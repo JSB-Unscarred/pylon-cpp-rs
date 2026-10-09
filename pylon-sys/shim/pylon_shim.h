@@ -12,7 +12,9 @@
  *            PylonStringCallback before the function returns, one call per string; the data is
  *            valid only during the call.
  * Callbacks  Callbacks must not unwind.
- * Enums      Values reported by pylon may lie outside the listed constants.
+ * Enums      Every enum has int32_t as fixed underlying type (C23, C++11), so the ABI and the
+ *            bindgen output are the same on every platform. Values reported by pylon may lie
+ *            outside the listed constants.
  * Threads    PylonCamera is synchronized by pylon, but only one thread at a time may wait in
  *            pylon_camera_retrieve_result or pylon_camera_grab_one. PylonGrabResult may be used
  *            from any thread. PylonDeviceInfo, PylonConverter and PylonImage are unsynchronized.
@@ -46,7 +48,7 @@ typedef struct PylonNode PylonNode;             /* borrowed: GenApi::INode */
  * Status and callbacks
  * ========================================================================================== */
 
-typedef enum PylonStatus {
+typedef enum PylonStatus : int32_t {
     PYLON_OK = 0,
     PYLON_ERROR_GENERIC,          /* GenICam::GenericException */
     PYLON_ERROR_BAD_ALLOC,        /* GenICam::BadAllocException, std::bad_alloc */
@@ -233,7 +235,7 @@ PylonStatus pylon_pixel_type_stride(uint32_t pixel_type, uint32_t width, size_t 
  * Image layout
  * ========================================================================================== */
 
-typedef enum PylonImageOrientation { /* Pylon::EImageOrientation */
+typedef enum PylonImageOrientation : int32_t { /* Pylon::EImageOrientation */
     PYLON_IMAGE_ORIENTATION_TOP_DOWN,
     PYLON_IMAGE_ORIENTATION_BOTTOM_UP
 } PylonImageOrientation;
@@ -284,7 +286,7 @@ PylonStatus pylon_enumerate_devices(const PylonDeviceInfo* const* filters, size_
  * removal the camera is destroyed and created again.
  * ========================================================================================== */
 
-typedef enum PylonNodeMapKind {
+typedef enum PylonNodeMapKind : int32_t {
     PYLON_NODE_MAP_DEVICE,          /* GetNodeMap: camera features */
     PYLON_NODE_MAP_TRANSPORT_LAYER, /* GetTLNodeMap */
     PYLON_NODE_MAP_STREAM_GRABBER,  /* GetStreamGrabberNodeMap, requires an open camera */
@@ -292,14 +294,14 @@ typedef enum PylonNodeMapKind {
     PYLON_NODE_MAP_INSTANT_CAMERA   /* GetInstantCameraNodeMap: MaxNumBuffer, GrabCameraEvents... */
 } PylonNodeMapKind;
 
-typedef enum PylonConfiguration {
+typedef enum PylonConfiguration : int32_t {
     PYLON_CONFIGURATION_NONE,
     PYLON_CONFIGURATION_ACQUIRE_CONTINUOUS,   /* CAcquireContinuousConfiguration, pylon default */
     PYLON_CONFIGURATION_ACQUIRE_SINGLE_FRAME, /* CAcquireSingleFrameConfiguration */
     PYLON_CONFIGURATION_SOFTWARE_TRIGGER      /* CSoftwareTriggerConfiguration */
 } PylonConfiguration;
 
-typedef enum PylonGrabStrategy { /* Pylon::EGrabStrategy */
+typedef enum PylonGrabStrategy : int32_t { /* Pylon::EGrabStrategy */
     PYLON_GRAB_STRATEGY_ONE_BY_ONE,
     PYLON_GRAB_STRATEGY_LATEST_IMAGE_ONLY,
     PYLON_GRAB_STRATEGY_LATEST_IMAGES,
@@ -379,7 +381,7 @@ PylonStatus pylon_camera_execute_software_trigger(PylonCamera* camera);
  * results keeps their buffers out of the grab queue.
  * ========================================================================================== */
 
-typedef enum PylonPayloadType { /* Pylon::EPayloadType */
+typedef enum PylonPayloadType : int32_t { /* Pylon::EPayloadType */
     PYLON_PAYLOAD_TYPE_UNDEFINED = -1,
     PYLON_PAYLOAD_TYPE_IMAGE,
     PYLON_PAYLOAD_TYPE_RAW_DATA,
@@ -426,7 +428,7 @@ PylonStatus pylon_grab_result_chunk_node_map(const PylonGrabResult* result, Pylo
  * PYLON_ERROR_DYNAMIC_CAST if the node does not implement the GenApi interface of their prefix.
  * ========================================================================================== */
 
-typedef enum PylonNodeType { /* GenApi::EInterfaceType */
+typedef enum PylonNodeType : int32_t { /* GenApi::EInterfaceType */
     PYLON_NODE_TYPE_VALUE,
     PYLON_NODE_TYPE_BASE,
     PYLON_NODE_TYPE_INTEGER,
@@ -441,7 +443,7 @@ typedef enum PylonNodeType { /* GenApi::EInterfaceType */
     PYLON_NODE_TYPE_PORT
 } PylonNodeType;
 
-typedef enum PylonAccessMode { /* GenApi::EAccessMode */
+typedef enum PylonAccessMode : int32_t { /* GenApi::EAccessMode */
     PYLON_ACCESS_MODE_NI, /* not implemented */
     PYLON_ACCESS_MODE_NA, /* not available */
     PYLON_ACCESS_MODE_WO,
@@ -449,7 +451,7 @@ typedef enum PylonAccessMode { /* GenApi::EAccessMode */
     PYLON_ACCESS_MODE_RW
 } PylonAccessMode;
 
-typedef enum PylonNodeText {
+typedef enum PylonNodeText : int32_t {
     PYLON_NODE_TEXT_NAME,
     PYLON_NODE_TEXT_DISPLAY_NAME,
     PYLON_NODE_TEXT_TOOL_TIP,

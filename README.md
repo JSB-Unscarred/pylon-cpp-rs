@@ -9,23 +9,45 @@ Safe Rust bindings for the Basler pylon C++ SDK (pylon 12), built on a thin C sh
 | Layer | Path | State |
 |---|---|---|
 | C shim | `pylon-sys/shim` | done |
-| Raw bindings (`-sys`, bindgen) | `pylon-sys` | planned |
+| Raw bindings (`-sys`, bindgen) | `pylon-sys` | done; verified on Windows, untested on Linux and macOS |
 | Safe Rust API | crate root | planned |
 
 Scope: camera control and basic pixel/format conversion. GUI functions are out of scope.
 
+Platforms: Windows x64, Linux x86_64 / aarch64, macOS x86_64 / arm64.
+
 ## Layout
 
 ```text
-pylon-sys/shim/pylon_shim.h     pure C header, the only bindgen input
+src/lib.rs                      safe Rust API (crate pylon-cpp-rs)
+pylon-sys/shim/pylon_shim.h     C header, the only bindgen input
 pylon-sys/shim/pylon_shim.cpp   C++17 implementation on top of the pylon C++ SDK
+pylon-sys/src/bindings.rs       bindgen output, committed; the same for every platform
+pylon-sys/build.rs              compiles the shim and links pylon
 ```
 
 ## Requirements
 
-- pylon 12 SDK. On Windows the installer sets `PYLON_DEV_DIR`; headers are in `include`, import libraries in `lib/x64`, and the runtime DLLs must be on `PATH`.
-- A C++17 compiler; with MSVC use `/EHsc /MD`. On Windows the pylon headers link their libraries through `#pragma comment(lib)`, so only the library directory is needed.
+- pylon 12 SDK and a C++17 compiler. `pylon-sys/build.rs` locates the SDK as follows:
+
+| Platform | SDK location | Compiler and linker settings | pylon libraries at run time |
+|---|---|---|---|
+| Windows | `PYLON_DEV_DIR`, set by the installer | `<PYLON_DEV_DIR>/include`, `<PYLON_DEV_DIR>/lib/x64`; the pylon headers select their libraries through `#pragma comment(lib)` | the installer puts the runtime DLLs on `PATH` |
+| Linux | `PYLON_ROOT`, default `/opt/pylon` | `<PYLON_ROOT>/bin/pylon-config --cflags` / `--libs` | `LD_LIBRARY_PATH`, or the output of `pylon-config --libs-rpath` as link arguments of the final binary |
+| macOS | `PYLON_ROOT`, default `/Library/Frameworks/pylon.framework` | framework search path is the parent of `PYLON_ROOT`, plus `<PYLON_ROOT>/Headers/GenICam` | runpath of the final binary, e.g. `cargo::rustc-link-arg=-Wl,-rpath,/Library/Frameworks` in its build script |
+
+- Cargo passes link arguments only to the binaries of the package that emits them, so `pylon-sys` cannot set the runpath of downstream binaries.
 - Tests without hardware can use the pylon camera emulator: set `PYLON_CAMEMU=<count>`.
+
+## Regenerating the bindings
+
+After changing `pylon_shim.h`, run:
+
+```bash
+cargo build -p pylon-sys --features bindgen
+```
+
+This needs LLVM: `libclang` (found through `LIBCLANG_PATH` or `PATH`) and the `clang` executable on `PATH`, which bindgen uses to locate the compiler's own headers. The build script generates the bindings for all five supported targets with `-ffreestanding` and fails if they differ, so the single committed file fits every platform.
 
 ## C shim conventions
 
@@ -36,6 +58,7 @@ The comment at the top of `pylon_shim.h` is the reference for handles, errors, s
 - The camera changes between open and closed only through `pylon_camera_open` / `pylon_camera_close`, so node maps never become invalid behind the caller's back.
 - Handlers that pylon calls from its own threads are left out. Grabbing runs in the thread that calls `pylon_camera_retrieve_result`, and camera events arrive as node callbacks inside that call.
 - pylon enums and all `EPixelType` values are mirrored and checked with `static_assert`.
+- Every shim enum has `int32_t` as fixed underlying type (C23, C++11), so its ABI is the same on every platform; bindgen turns it into a newtype such as `PylonStatus(pub i32)` that also holds values outside the listed constants.
 
 ## API mapping
 

@@ -1,0 +1,13 @@
+[package]
+name = "pylon-sys"
+version = "0.1.0"
+edition = "2024"
+links = "pylon"
+
+[features]
+# Regenerates src/bindings.rs from shim/pylon_shim.h; requires libclang.
+bindgen = ["dep:bindgen"]
+
+[build-dependencies]
+bindgen = { version = "0.73.2", optional = true }
+cc = "1.6.0"

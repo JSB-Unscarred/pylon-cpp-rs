@@ -9,23 +9,45 @@ Basler pylon C++ SDK（pylon 12）的 Rust 安全包装，底层是一层很薄�
 | 层 | 路径 | 状态 |
 |---|---|---|
 | C shim | `pylon-sys/shim` | 已完成 |
-| 原始绑定（`-sys`，bindgen） | `pylon-sys` | 计划中 |
+| 原始绑定（`-sys`，bindgen） | `pylon-sys` | 已完成；已在 Windows 验证，Linux 与 macOS 尚未测试 |
 | Rust 安全 API | crate 根目录 | 计划中 |
 
 范围：相机操作与基础的像素、格式转换。GUI 相关功能不在范围内。
 
+平台：Windows x64、Linux x86_64 / aarch64、macOS x86_64 / arm64。
+
 ## 目录
 
 ```text
-pylon-sys/shim/pylon_shim.h     纯 C 头文件，bindgen 唯一输入
+src/lib.rs                      Rust 安全 API（crate pylon-cpp-rs）
+pylon-sys/shim/pylon_shim.h     C 头文件，bindgen 唯一输入
 pylon-sys/shim/pylon_shim.cpp   基于 pylon C++ SDK 的 C++17 实现
+pylon-sys/src/bindings.rs       bindgen 输出，已入库，各平台通用
+pylon-sys/build.rs              编译 shim 并链接 pylon
 ```
 
 ## 环境要求
 
-- pylon 12 SDK。Windows 安装程序会设置 `PYLON_DEV_DIR`；头文件在 `include`，导入库在 `lib/x64`，运行时 DLL 需在 `PATH` 中。
-- C++17 编译器；MSVC 使用 `/EHsc /MD`。Windows 上 pylon 头文件通过 `#pragma comment(lib)` 自动链接，只需提供库目录。
+- pylon 12 SDK 与 C++17 编译器。`pylon-sys/build.rs` 按下表定位 SDK：
+
+| 平台 | SDK 位置 | 编译与链接设置 | 运行时查找 pylon 库 |
+|---|---|---|---|
+| Windows | `PYLON_DEV_DIR`，由安装程序设置 | `<PYLON_DEV_DIR>/include`、`<PYLON_DEV_DIR>/lib/x64`；pylon 头文件通过 `#pragma comment(lib)` 选择库 | 安装程序把运行时 DLL 目录加入 `PATH` |
+| Linux | `PYLON_ROOT`，默认 `/opt/pylon` | `<PYLON_ROOT>/bin/pylon-config --cflags` / `--libs` | `LD_LIBRARY_PATH`，或把 `pylon-config --libs-rpath` 的输出作为最终二进制的链接参数 |
+| macOS | `PYLON_ROOT`，默认 `/Library/Frameworks/pylon.framework` | framework 搜索路径为 `PYLON_ROOT` 的父目录，另加 `<PYLON_ROOT>/Headers/GenICam` | 最终二进制的 runpath，例如在其 build script 中输出 `cargo::rustc-link-arg=-Wl,-rpath,/Library/Frameworks` |
+
+- Cargo 只把链接参数传给输出它的 package 自己的二进制，所以 `pylon-sys` 无法设置下游二进制的 runpath。
 - 无硬件测试可使用 pylon 相机模拟器：设置 `PYLON_CAMEMU=<数量>`。
+
+## 重新生成绑定
+
+修改 `pylon_shim.h` 后运行：
+
+```bash
+cargo build -p pylon-sys --features bindgen
+```
+
+需要 LLVM：`libclang`（经 `LIBCLANG_PATH` 或 `PATH` 查找）以及 `PATH` 中的 `clang` 可执行文件，bindgen 用它定位编译器自带的头文件。build script 以 `-ffreestanding` 为五个支持的 target 分别生成绑定，结果不一致时报错，因此入库的单个文件适用于所有平台。
 
 ## C shim 约定
 
@@ -36,6 +58,7 @@ handle、错误、字符串、回调与线程的约定以 `pylon_shim.h` 顶部�
 - 相机的打开 / 关闭状态只由 `pylon_camera_open` / `pylon_camera_close` 改变，node map 不会在调用方不知情时失效。
 - pylon 在其内部线程调用的 handler 一律不包装。采集在调用 `pylon_camera_retrieve_result` 的线程中进行，相机事件以节点回调的形式在该调用内触发。
 - pylon 枚举和全部 `EPixelType` 值在头文件中镜像，并用 `static_assert` 校验。
+- shim 的每个 enum 都以 `int32_t` 为固定底层类型（C23、C++11），ABI 在各平台一致；bindgen 将其生成为 `PylonStatus(pub i32)` 这样的 newtype，也能容纳列出常量之外的值。
 
 ## API 对照
 
