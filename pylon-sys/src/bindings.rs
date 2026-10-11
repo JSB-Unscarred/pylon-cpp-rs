@@ -159,6 +159,8 @@ pub type PylonNodeCallback = ::std::option::Option<
 pub type PylonDeviceInfoCallback = ::std::option::Option<
     unsafe extern "C" fn(ctx: *mut ::std::os::raw::c_void, info: *mut PylonDeviceInfo),
 >;
+pub type PylonDropCallback =
+    ::std::option::Option<unsafe extern "C" fn(ctx: *mut ::std::os::raw::c_void)>;
 unsafe extern "C" {
     pub fn pylon_last_error() -> *const ::std::os::raw::c_char;
 }
@@ -531,7 +533,7 @@ unsafe extern "C" {
 }
 unsafe extern "C" {
     pub fn pylon_grab_result_chunk_node_map(
-        result: *const PylonGrabResult,
+        result: *mut PylonGrabResult,
         out: *mut *mut PylonNodeMap,
     ) -> PylonStatus;
 }
@@ -611,11 +613,8 @@ unsafe extern "C" {
         node: *mut PylonNode,
         cb: PylonNodeCallback,
         ctx: *mut ::std::os::raw::c_void,
-        out: *mut isize,
+        drop: PylonDropCallback,
     ) -> PylonStatus;
-}
-unsafe extern "C" {
-    pub fn pylon_node_deregister_callback(registration: isize) -> PylonStatus;
 }
 unsafe extern "C" {
     pub fn pylon_value_to_string(

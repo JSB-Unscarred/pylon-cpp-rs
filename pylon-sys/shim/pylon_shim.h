@@ -3,7 +3,9 @@
  *
  * Handles    Owned handles are released with their *_destroy function. Borrowed handles
  *            (PylonNodeMap, PylonNode, image buffers) are never released; each accessor states
- *            how long they stay valid. Handle arguments are non-NULL unless stated otherwise.
+ *            how long they stay valid. Handle arguments are non-NULL unless stated otherwise;
+ *            so are handles written to out parameters on PYLON_OK, returned handles, handles
+ *            passed to callbacks, PylonPixelTypeInfo.name and pylon_last_error().
  * Errors     Functions returning PylonStatus turn every C++ exception into a status; the
  *            description of the last failure on the calling thread is returned by
  *            pylon_last_error(). Out parameters are meaningful only on PYLON_OK. Functions
@@ -11,13 +13,15 @@
  * Strings    Input strings are NUL-terminated UTF-8. Output strings are passed to a
  *            PylonStringCallback before the function returns, one call per string; the data is
  *            valid only during the call.
- * Callbacks  Callbacks must not unwind.
+ * Callbacks  Callback function pointers are non-NULL. Callbacks must not unwind.
  * Enums      Every enum has int32_t as fixed underlying type (C23, C++11), so the ABI and the
  *            bindgen output are the same on every platform. Values reported by pylon may lie
  *            outside the listed constants.
  * Threads    PylonCamera is synchronized by pylon, but only one thread at a time may wait in
  *            pylon_camera_retrieve_result or pylon_camera_grab_one. PylonGrabResult may be used
  *            from any thread. PylonDeviceInfo, PylonConverter and PylonImage are unsynchronized.
+ *            Single node operations are serialized by the node map lock; sequences such as
+ *            selector plus value are not atomic.
  * Runtime    Every object must be destroyed before the last pylon_terminate().
  */
 
@@ -71,6 +75,9 @@ typedef void (*PylonNodeCallback)(void* ctx, PylonNode* node);
 
 /* Receives one device info; the callee owns it. */
 typedef void (*PylonDeviceInfoCallback)(void* ctx, PylonDeviceInfo* info);
+
+/* Releases a ctx whose ownership was passed to the shim. */
+typedef void (*PylonDropCallback)(void* ctx);
 
 /* Timeout that waits forever. */
 #define PYLON_INFINITE 0xFFFFFFFFu
@@ -330,9 +337,10 @@ bool pylon_camera_is_open(const PylonCamera* camera);
 /* CInstantCamera::IsCameraDeviceRemoved. Detection requires an open camera. */
 bool pylon_camera_is_device_removed(const PylonCamera* camera);
 
-/* Node map of the camera. DEVICE, STREAM_GRABBER and EVENT_GRABBER stay valid until
- * pylon_camera_close or pylon_camera_destroy; TRANSPORT_LAYER and INSTANT_CAMERA until
- * pylon_camera_destroy. */
+/* Node map of the camera. STREAM_GRABBER and EVENT_GRABBER stay valid until pylon_camera_close
+ * or pylon_camera_destroy; DEVICE, TRANSPORT_LAYER and INSTANT_CAMERA until pylon_camera_destroy
+ * (pylon's device specific cameras keep the DEVICE map across Close). A failed open closes the
+ * device again but does not end node maps obtained before. */
 PylonStatus pylon_camera_node_map(PylonCamera* camera, PylonNodeMapKind kind, PylonNodeMap** out);
 
 /* CInstantCamera::RegisterConfiguration with RegistrationMode_ReplaceAll. Takes effect when the
@@ -345,8 +353,10 @@ PylonStatus pylon_camera_set_configuration(PylonCamera* camera, PylonConfigurati
 PylonStatus pylon_camera_start_grabbing(PylonCamera* camera, PylonGrabStrategy strategy,
                                         size_t max_images);
 
-/* CInstantCamera::StopGrabbing. A thread waiting in pylon_camera_retrieve_result returns at once
- * with NULL. */
+/* CInstantCamera::StopGrabbing. A thread waiting in pylon_camera_retrieve_result returns once a
+ * node callback running there has returned. Must not be called from a node callback that runs
+ * inside pylon_camera_retrieve_result or pylon_camera_grab_one of the same camera (pylon crashes)
+ * or inside pylon_camera_start_grabbing (pylon hangs). */
 void pylon_camera_stop_grabbing(PylonCamera* camera);
 
 /* CInstantCamera::IsGrabbing. */
@@ -418,8 +428,8 @@ PylonStatus pylon_grab_result_error_description(const PylonGrabResult* result,
                                                 PylonStringCallback cb, void* ctx);
 
 /* CGrabResultData::GetChunkDataNodeMap, valid until the result is destroyed. The node map is
- * empty if chunks are disabled. */
-PylonStatus pylon_grab_result_chunk_node_map(const PylonGrabResult* result, PylonNodeMap** out);
+ * empty if chunks are disabled. Writable chunk nodes write into the buffer of the result. */
+PylonStatus pylon_grab_result_chunk_node_map(PylonGrabResult* result, PylonNodeMap** out);
 
 /* ============================================================================================
  * Node map and nodes
@@ -477,15 +487,16 @@ PylonStatus pylon_node_access_mode(PylonNode* node, PylonAccessMode* out);
 PylonStatus pylon_node_text(PylonNode* node, PylonNodeText text, PylonStringCallback cb,
                             void* ctx);
 
-/* GenApi::Register. cb runs on the thread that changes the node, outside the node map
- * lock, until pylon_node_deregister_callback or the end of the node map. Camera events update
- * their data nodes (e.g. EventExposureEndData) inside pylon_camera_retrieve_result once
- * GrabCameraEvents is enabled in the INSTANT_CAMERA node map before pylon_camera_open. */
+/* GenApi::Register. cb runs on the thread that changes the node, outside the node map lock,
+ * possibly on several threads at once. Camera events update their data nodes (e.g.
+ * EventExposureEndFrameID) inside pylon_camera_retrieve_result and pylon_camera_grab_one once
+ * GrabCameraEvents is enabled in the INSTANT_CAMERA node map before pylon_camera_open.
+ * ctx passes to the shim in every case: drop(ctx) runs at most once, after the last cb, when the
+ * node map ends, i.e. inside pylon_camera_destroy for the DEVICE map. A failed call may run
+ * drop(ctx) before it returns. Registrations cannot be removed:
+ * GenApi::Deregister neither waits for running callbacks nor tolerates concurrent ones. */
 PylonStatus pylon_node_register_callback(PylonNode* node, PylonNodeCallback cb, void* ctx,
-                                         intptr_t* out);
-
-/* GenApi::Deregister. Requires the node map of the registration to be valid. */
-PylonStatus pylon_node_deregister_callback(intptr_t registration);
+                                         PylonDropCallback drop);
 
 /* IValue::ToString; the symbolic of the current entry of an enumeration, the value of a string,
  * the numeric value of an enumeration entry. */
@@ -553,7 +564,12 @@ PylonStatus pylon_converter_set_output_pixel_type(PylonConverter* converter, uin
 bool pylon_converter_has_destination_format(const PylonConverter* converter,
                                             const PylonImageView* source);
 
-/* CImageFormatConverter::Convert of the source into the destination image. */
+/* CImageFormatConverter::Convert of the source into the destination image; reads at most
+ * source->size bytes. On failure the destination is empty. Fails
+ * - unless InconvertibleEdgeHandling is SetZero, the default: pylon writes past planar
+ *   destinations with Clip and reads before 16-bit Bayer sources with Extend;
+ * - for YUV422 and YUV420 planar outputs, of which pylon leaves some bytes unwritten;
+ * - for source layouts whose size does not fit in 64 bits, which pylon would compute wrapped. */
 PylonStatus pylon_converter_convert(PylonConverter* converter, PylonImage* destination,
                                     const PylonImageView* source);
 

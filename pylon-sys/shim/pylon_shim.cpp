@@ -5,9 +5,11 @@
 #include <pylon/PylonIncludes.h>
 
 #include <cstdint>
+#include <memory>
 #include <new>
 #include <string>
 #include <type_traits>
+#include <vector>
 
 // Owned handles: each one holds exactly one pylon object.
 
@@ -298,6 +300,20 @@ std::uint32_t defined_or_zero(Property property) {
     }
 }
 
+// Whether every size pylon computes for the layout fits in 64 bits. pylon computes them modulo
+// 2^64, so a wrapped size would pass its own check; in bits they stay below
+// 4 * (width * bits_per_pixel + 8 * (padding_x + 1)) * height (measured for every pixel type).
+bool layout_fits(std::uint32_t bits_per_pixel, std::uint32_t width, std::uint32_t height,
+                 std::size_t padding_x) {
+    constexpr std::uint64_t max = UINT64_MAX / 4;
+    const std::uint64_t pixels = std::uint64_t{width} * bits_per_pixel;
+    if (padding_x >= (max - pixels) / 8) {
+        return false;
+    }
+    const std::uint64_t row = pixels + 8 * (padding_x + 1);
+    return height == 0 || row <= max / height;
+}
+
 PylonImageView view(const Pylon::IImage& image) {
     return {
         image.GetBuffer(),
@@ -354,17 +370,18 @@ GenICam::gcstring node_text(const GenApi::INode& node, PylonNodeText text) {
     throw INVALID_ARGUMENT_EXCEPTION("Invalid node text %d", static_cast<int>(text));
 }
 
-// A C callback as the function GenApi::Register expects; GenApi tests it before each call.
+// A C callback as the function GenApi::Register expects; GenApi tests it before each call. The
+// copies share ctx; the last one, destroyed with the registration, calls drop.
 struct NodeCallback {
     PylonNodeCallback cb;
-    void* ctx;
+    std::shared_ptr<void> ctx;
 
     explicit operator bool() const {
         return cb != nullptr;
     }
 
     void operator()(GenApi::INode* node) const {
-        cb(ctx, wrap(node));
+        cb(ctx.get(), wrap(node));
     }
 };
 
@@ -628,7 +645,7 @@ PylonStatus pylon_grab_result_error_description(const PylonGrabResult* result,
     return guard([&] { emit(cb, ctx, result->ptr->GetErrorDescription()); });
 }
 
-PylonStatus pylon_grab_result_chunk_node_map(const PylonGrabResult* result, PylonNodeMap** out) {
+PylonStatus pylon_grab_result_chunk_node_map(PylonGrabResult* result, PylonNodeMap** out) {
     return guard([&] { *out = wrap(result->ptr->GetChunkDataNodeMap()); });
 }
 
@@ -666,14 +683,12 @@ PylonStatus pylon_node_text(PylonNode* node, PylonNodeText text, PylonStringCall
 }
 
 PylonStatus pylon_node_register_callback(PylonNode* node, PylonNodeCallback cb, void* ctx,
-                                         intptr_t* out) {
+                                         PylonDropCallback drop) {
     return guard([&] {
-        *out = GenApi::Register(unwrap(node), NodeCallback{cb, ctx}, GenApi::cbPostOutsideLock);
+        // shared_ptr calls drop itself if it cannot allocate, so ctx passes in every case.
+        GenApi::Register(unwrap(node), NodeCallback{cb, std::shared_ptr<void>(ctx, drop)},
+                         GenApi::cbPostOutsideLock);
     });
-}
-
-PylonStatus pylon_node_deregister_callback(intptr_t registration) {
-    return guard([&] { GenApi::Deregister(registration); });
 }
 
 PylonStatus pylon_value_to_string(PylonNode* node, PylonStringCallback cb, void* ctx) {
@@ -800,10 +815,42 @@ bool pylon_converter_has_destination_format(const PylonConverter* converter,
 PylonStatus pylon_converter_convert(PylonConverter* converter, PylonImage* destination,
                                     const PylonImageView* source) {
     return guard([&] {
-        converter->converter.Convert(destination->image, source->buffer, source->size,
-                                     to_pixel_type(source->pixel_type), source->width,
-                                     source->height, source->padding_x,
-                                     static_cast<Pylon::EImageOrientation>(source->orientation));
+        try {
+            if (converter->converter.InconvertibleEdgeHandling.GetValue() !=
+                Basler_ImageFormatConverterParams::InconvertibleEdgeHandling_SetZero) {
+                throw INVALID_ARGUMENT_EXCEPTION("InconvertibleEdgeHandling must be SetZero");
+            }
+            const Pylon::EPixelType output = converter->converter.OutputPixelFormat.GetValue();
+            if (output == Pylon::PixelType_YUV422planar ||
+                output == Pylon::PixelType_YUV420planar) {
+                throw INVALID_ARGUMENT_EXCEPTION("YUV422 and YUV420 planar outputs are unsupported");
+            }
+            const Pylon::EPixelType type = to_pixel_type(source->pixel_type);
+            const std::uint32_t bits_per_pixel = Pylon::BitPerPixel(type);
+            if (!layout_fits(bits_per_pixel, source->width, source->height, source->padding_x)) {
+                throw INVALID_ARGUMENT_EXCEPTION("Source image layout too large");
+            }
+            // pylon reads one byte past sources with less than 8 bits per pixel, so those are
+            // converted from a copy with a spare byte.
+            std::vector<std::uint8_t> copy;
+            const void* buffer = source->buffer;
+            if (bits_per_pixel < 8 && source->size != 0) {
+                const auto* bytes = static_cast<const std::uint8_t*>(source->buffer);
+                copy.reserve(source->size + 1);
+                copy.assign(bytes, bytes + source->size);
+                copy.push_back(0);
+                buffer = copy.data();
+            }
+            const auto orientation = static_cast<Pylon::EImageOrientation>(source->orientation);
+            converter->converter.Convert(destination->image, buffer, source->size, type,
+                                         source->width, source->height, source->padding_x,
+                                         orientation);
+        } catch (...) {
+            // pylon may allocate the destination before failing; releasing it leaves no unwritten
+            // memory visible.
+            destination->image.Release();
+            throw;
+        }
     });
 }
 
