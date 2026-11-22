@@ -379,9 +379,6 @@ unsafe extern "C" {
     pub fn pylon_camera_open(camera: *mut PylonCamera) -> PylonStatus;
 }
 unsafe extern "C" {
-    pub fn pylon_camera_close(camera: *mut PylonCamera);
-}
-unsafe extern "C" {
     pub fn pylon_camera_is_open(camera: *const PylonCamera) -> bool;
 }
 unsafe extern "C" {

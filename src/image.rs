@@ -109,7 +109,7 @@ impl PixelType {
 
     /// Properties of the pixel type; fails for values that are not pixel types, e.g. UNDEFINED.
     pub fn info(self) -> Result<PixelTypeInfo> {
-        // SAFETY: the out parameter is a valid PylonPixelTypeInfo.
+        // SAFETY: pylon_pixel_type_info accepts any value.
         let info = out(|info| unsafe { sys::pylon_pixel_type_info(self.0, info) })?;
         // SAFETY: on PYLON_OK name is a non-NULL C string in static storage (pylon_shim.h).
         let name = unsafe { CStr::from_ptr(info.name) };
@@ -139,7 +139,7 @@ impl PixelType {
     /// not byte aligned and have no padding, planar YUV422 and YUV420; also for width 0 and for
     /// UNDEFINED.
     pub fn stride(self, width: u32, padding_x: usize) -> Result<Option<usize>> {
-        // SAFETY: the out parameter is a valid usize.
+        // SAFETY: pylon_pixel_type_stride accepts any values.
         let stride = out(|stride| unsafe {
             sys::pylon_pixel_type_stride(self.0, width, padding_x, stride)
         })?;
@@ -173,31 +173,20 @@ impl Orientation {
 }
 
 /// Image memory with its layout, borrowed from a [`GrabResult`](crate::GrabResult), an [`Image`]
-/// or the caller.
+/// or the caller, e.g. to convert it. Conversions check that `data` is large enough for the
+/// layout.
 #[derive(Clone, Copy)]
 pub struct ImageView<'a> {
-    data: &'a [u8],
-    pixel_type: PixelType,
-    width: u32,
-    height: u32,
-    padding_x: usize,
-    orientation: Orientation,
+    pub data: &'a [u8],
+    pub pixel_type: PixelType,
+    pub width: u32,
+    pub height: u32,
+    /// Extra bytes at the end of each row.
+    pub padding_x: usize,
+    pub orientation: Orientation,
 }
 
 impl<'a> ImageView<'a> {
-    /// Describes memory of the caller, e.g. to convert it. `padding_x` is the number of extra bytes
-    /// at the end of each row. Conversions check that `data` is large enough for the layout.
-    pub fn new(
-        data: &'a [u8],
-        pixel_type: PixelType,
-        width: u32,
-        height: u32,
-        padding_x: usize,
-        orientation: Orientation,
-    ) -> Self {
-        ImageView { data, pixel_type, width, height, padding_x, orientation }
-    }
-
     /// View of memory reported by the shim; None for an invalid image.
     ///
     /// # Safety
@@ -229,31 +218,6 @@ impl<'a> ImageView<'a> {
             orientation: self.orientation.0,
         }
     }
-
-    pub fn data(&self) -> &'a [u8] {
-        self.data
-    }
-
-    pub fn pixel_type(&self) -> PixelType {
-        self.pixel_type
-    }
-
-    pub fn width(&self) -> u32 {
-        self.width
-    }
-
-    pub fn height(&self) -> u32 {
-        self.height
-    }
-
-    /// Extra bytes at the end of each row.
-    pub fn padding_x(&self) -> usize {
-        self.padding_x
-    }
-
-    pub fn orientation(&self) -> Orientation {
-        self.orientation
-    }
 }
 
 /// `Pylon::CPylonImage`, the target of conversions. Its buffer is reused while large enough.
@@ -269,8 +233,7 @@ unsafe impl Send for Image {}
 impl Image {
     /// Empty image.
     pub fn new(pylon: &Pylon) -> Result<Image> {
-        // SAFETY: the out parameter is a valid handle pointer; pylon_image_create writes a
-        // non-NULL handle on PYLON_OK (pylon_shim.h).
+        // SAFETY: the handle is non-NULL on PYLON_OK (pylon_shim.h Handles).
         let raw = unsafe { handle(|image| sys::pylon_image_create(image)) }?;
         Ok(Image { raw, _pylon: pylon.clone() })
     }
@@ -304,8 +267,7 @@ unsafe impl Send for Converter {}
 
 impl Converter {
     pub fn new(pylon: &Pylon) -> Result<Converter> {
-        // SAFETY: the out parameter is a valid handle pointer; pylon_converter_create writes a
-        // non-NULL handle on PYLON_OK (pylon_shim.h).
+        // SAFETY: the handle is non-NULL on PYLON_OK (pylon_shim.h Handles).
         let raw = unsafe { handle(|converter| sys::pylon_converter_create(converter)) }?;
         Ok(Converter { raw, _pylon: pylon.clone() })
     }

@@ -40,7 +40,7 @@ pylon-sys/build.rs              编译 shim 并链接 pylon
 | macOS | `PYLON_ROOT`，默认 `/Library/Frameworks/pylon.framework` | framework 搜索路径为 `PYLON_ROOT` 的父目录，另加 `<PYLON_ROOT>/Headers/GenICam` | 最终二进制的 runpath，例如在其 build script 中输出 `cargo::rustc-link-arg=-Wl,-rpath,/Library/Frameworks` |
 
 - Cargo 只把链接参数传给输出它的 package 自己的二进制，所以 `pylon-sys` 无法设置下游二进制的 runpath。
-- 无硬件测试可使用 pylon 相机模拟器：设置 `PYLON_CAMEMU=<数量>`。
+- 无硬件时可使用 pylon 相机模拟器：设置 `PYLON_CAMEMU=<数量>`。
 
 ## 示例
 
@@ -66,7 +66,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         };
         converter.convert(&mut image, &source)?;
         let bgr = image.view().ok_or("empty image")?;
-        println!("frame {}: {}x{}, {} bytes", info.block_id, bgr.width(), bgr.height(), bgr.data().len());
+        println!("frame {}: {}x{}, {} bytes", info.block_id, bgr.width, bgr.height, bgr.data.len());
     }
     Ok(())
 }
@@ -88,7 +88,7 @@ handle、错误、字符串、回调与线程的约定以 `pylon_shim.h` 顶部�
 
 - 每个 C++ 异常转换为以其 GenICam 异常类命名的 `PylonStatus`。
 - 字符串和列表经同步回调交付。
-- 相机只经 `pylon_camera_open`、`pylon_camera_start_grabbing`、`pylon_camera_grab_one` 打开，只经 `pylon_camera_close`、`pylon_camera_destroy` 关闭，node map 不会在调用方不知情时失效。
+- 相机只经 `pylon_camera_open`、`pylon_camera_start_grabbing`、`pylon_camera_grab_one` 打开，只经 `pylon_camera_destroy` 关闭，node map 不会在调用方不知情时失效。
 - pylon 在其内部线程调用的 handler 一律不包装。采集在调用 `pylon_camera_retrieve_result` 的线程中进行，相机事件以节点回调的形式在该调用或 `pylon_camera_grab_one` 内触发。
 - 节点回调的注册接管其上下文，node map 结束时经 drop 回调释放；注册不能撤销。
 - pylon 枚举和全部 `EPixelType` 值在头文件中镜像，并用 `static_assert` 校验。
@@ -125,7 +125,7 @@ handle、错误、字符串、回调与线程的约定以 `pylon_shim.h` 顶部�
 | `CTlFactory::CreateDevice` / `CreateFirstDevice` + `CInstantCamera(IPylonDevice*)` | `pylon_camera_create` | `Camera::new` |
 | `CInstantCamera::~CInstantCamera` | `pylon_camera_destroy` | drop `Camera` |
 | `GetDeviceInfo` | `pylon_camera_device_info` | `Camera::device_info` |
-| `Open` / `Close` / `IsOpen` | `pylon_camera_open` / `pylon_camera_close` / `pylon_camera_is_open` | `Camera::open` / drop `Camera` / `Camera::is_open` |
+| `Open` / `Close` / `IsOpen` | `pylon_camera_open` / `pylon_camera_destroy` / `pylon_camera_is_open` | `Camera::open` / drop `Camera` / `Camera::is_open` |
 | `IsCameraDeviceRemoved` | `pylon_camera_is_device_removed` | `Camera::is_device_removed` |
 | `GetNodeMap` / `GetTLNodeMap` / `GetStreamGrabberNodeMap` / `GetEventGrabberNodeMap` / `GetInstantCameraNodeMap` | `pylon_camera_node_map` | `Camera::node_map` / `tl_node_map` / `stream_grabber_node_map` / `event_grabber_node_map` / `instant_camera_node_map` |
 | `RegisterConfiguration` 配合 `CAcquireContinuousConfiguration` / `CAcquireSingleFrameConfiguration` / `CSoftwareTriggerConfiguration` | `pylon_camera_set_configuration` | `Camera::set_configuration`、`Configuration` |
@@ -178,7 +178,7 @@ handle、错误、字符串、回调与线程的约定以 `pylon_shim.h` 顶部�
 | `CImageFormatConverter::GetNodeMap`（`Gamma`、`OutputBitAlignment`、`OutputOrientation` 等） | `pylon_converter_node_map` | `Converter::node_map` |
 | `CImageFormatConverter::OutputPixelFormat` | `pylon_converter_set_output_pixel_type` | `Converter::set_output_pixel_type` |
 | `CImageFormatConverter::ImageHasDestinationFormat` | `pylon_converter_has_destination_format` | `Converter::has_destination_format` |
-| `CImageFormatConverter::Convert` | `pylon_converter_convert` | `Converter::convert`；源图像来自 `GrabResultInfo::image`、`Image::view` 或 `ImageView::new` |
+| `CImageFormatConverter::Convert` | `pylon_converter_convert` | `Converter::convert`；源图像来自 `GrabResultInfo::image`、`Image::view` 或描述调用方内存的 `ImageView` |
 
 ## 暂不包装 / 无需包装
 

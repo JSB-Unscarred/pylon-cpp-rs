@@ -1,6 +1,6 @@
 //! GenApi node maps and nodes.
 
-use crate::{Result, c_string, check, optional_handle, out, push_handle, string, sys};
+use crate::{Result, c_string, check, out, push_handle, string, sys};
 use std::ffi::c_void;
 use std::marker::PhantomData;
 use std::ptr::NonNull;
@@ -22,13 +22,12 @@ impl<'a> NodeMap<'a> {
     /// `INodeMap::GetNode`; None if the map has no node of that name.
     pub fn node(self, name: &str) -> Result<Option<Node<'a>>> {
         let name = c_string(name)?;
-        // SAFETY: the map is valid for 'a; name is a C string; the out parameter is a valid handle
-        // pointer.
-        let node = optional_handle(|node| unsafe {
+        // SAFETY: the map is valid for 'a; name is a C string.
+        let node = out(|node| unsafe {
             sys::pylon_node_map_node(self.raw.as_ptr(), name.as_ptr(), node)
         })?;
         // SAFETY: a node stays valid as long as its node map (pylon_shim.h), so for 'a.
-        Ok(node.map(|node| unsafe { Node::from_raw(node) }))
+        Ok(NonNull::new(node).map(|node| unsafe { Node::from_raw(node) }))
     }
 
     /// `CFeaturePersistence::LoadFromString`. Values are written without range checks; validation
@@ -68,7 +67,7 @@ impl<'a> Node<'a> {
     /// `INode::GetPrincipalInterfaceType`.
     pub fn node_type(self) -> Result<NodeType> {
         let mut node_type = sys::PylonNodeType(0);
-        // SAFETY: the node is valid for 'a; node_type is a valid out parameter.
+        // SAFETY: the node is valid for 'a.
         check(unsafe { sys::pylon_node_type(self.raw.as_ptr(), &mut node_type) })?;
         Ok(NodeType(node_type))
     }
@@ -76,7 +75,7 @@ impl<'a> Node<'a> {
     /// `IBase::GetAccessMode`.
     pub fn access_mode(self) -> Result<AccessMode> {
         let mut mode = sys::PylonAccessMode(0);
-        // SAFETY: the node is valid for 'a; mode is a valid out parameter.
+        // SAFETY: the node is valid for 'a.
         check(unsafe { sys::pylon_node_access_mode(self.raw.as_ptr(), &mut mode) })?;
         Ok(AccessMode(mode))
     }
@@ -119,7 +118,7 @@ impl<'a> Node<'a> {
     }
 
     pub fn integer(self) -> Result<i64> {
-        // SAFETY: the node is valid for 'a; the out parameter is a valid i64.
+        // SAFETY: the node is valid for 'a.
         out(|value| unsafe { sys::pylon_integer_get(self.raw.as_ptr(), value) })
     }
 
@@ -130,12 +129,12 @@ impl<'a> Node<'a> {
 
     /// (min, max, inc) of an integer.
     pub fn integer_range(self) -> Result<(i64, i64, i64)> {
-        // SAFETY: the node is valid for 'a; min, max and inc are valid out parameters.
+        // SAFETY: the node is valid for 'a.
         out(|(min, max, inc)| unsafe { sys::pylon_integer_range(self.raw.as_ptr(), min, max, inc) })
     }
 
     pub fn float(self) -> Result<f64> {
-        // SAFETY: the node is valid for 'a; the out parameter is a valid f64.
+        // SAFETY: the node is valid for 'a.
         out(|value| unsafe { sys::pylon_float_get(self.raw.as_ptr(), value) })
     }
 
@@ -146,7 +145,7 @@ impl<'a> Node<'a> {
 
     /// (min, max, inc) of a float; inc is None if the node has no increment.
     pub fn float_range(self) -> Result<(f64, f64, Option<f64>)> {
-        // SAFETY: the node is valid for 'a; min, max and inc are valid out parameters.
+        // SAFETY: the node is valid for 'a.
         let (min, max, inc): (f64, f64, f64) = out(|(min, max, inc)| unsafe {
             sys::pylon_float_range(self.raw.as_ptr(), min, max, inc)
         })?;
@@ -154,7 +153,7 @@ impl<'a> Node<'a> {
     }
 
     pub fn boolean(self) -> Result<bool> {
-        // SAFETY: the node is valid for 'a; the out parameter is a valid bool.
+        // SAFETY: the node is valid for 'a.
         out(|value| unsafe { sys::pylon_boolean_get(self.raw.as_ptr(), value) })
     }
 
@@ -171,7 +170,7 @@ impl<'a> Node<'a> {
 
     /// `ICommand::IsDone`.
     pub fn is_done(self) -> Result<bool> {
-        // SAFETY: the node is valid for 'a; the out parameter is a valid bool.
+        // SAFETY: the node is valid for 'a.
         out(|done| unsafe { sys::pylon_command_is_done(self.raw.as_ptr(), done) })
     }
 

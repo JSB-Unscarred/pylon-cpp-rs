@@ -45,7 +45,7 @@ pub use node::{AccessMode, Node, NodeMap, NodeType};
 use pylon_sys as sys;
 use std::ffi::{CStr, CString, c_char, c_void};
 use std::fmt;
-use std::ptr::{self, NonNull};
+use std::ptr::NonNull;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -175,22 +175,13 @@ fn out<T: Default>(call: impl FnOnce(&mut T) -> sys::PylonStatus) -> Result<T> {
     Ok(value)
 }
 
-/// Handle a shim function writes to its out parameter; None if it writes NULL.
-fn optional_handle<T>(
-    call: impl FnOnce(&mut *mut T) -> sys::PylonStatus,
-) -> Result<Option<NonNull<T>>> {
-    let mut raw = ptr::null_mut();
-    check(call(&mut raw))?;
-    Ok(NonNull::new(raw))
-}
-
 /// Handle a shim function writes to its out parameter.
 ///
 /// # Safety
 /// `call` writes a non-NULL pointer whenever it returns PYLON_OK.
 unsafe fn handle<T>(call: impl FnOnce(&mut *mut T) -> sys::PylonStatus) -> Result<NonNull<T>> {
     // SAFETY: call returned PYLON_OK, so it wrote a non-NULL pointer (caller contract).
-    optional_handle(call).map(|raw| unsafe { raw.unwrap_unchecked() })
+    out(call).map(|raw| unsafe { NonNull::new_unchecked(raw) })
 }
 
 /// Collects the handles a shim function passes to its callback.

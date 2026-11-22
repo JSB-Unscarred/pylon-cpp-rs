@@ -289,8 +289,8 @@ PylonStatus pylon_enumerate_devices(const PylonDeviceInfo* const* filters, size_
 /* ============================================================================================
  * Camera
  *
- * A camera holds its device from pylon_camera_create until pylon_camera_destroy; after a device
- * removal the camera is destroyed and created again.
+ * A camera holds its device from pylon_camera_create until pylon_camera_destroy, which is also
+ * the only way to close it; after a device removal the camera is destroyed and created again.
  * ========================================================================================== */
 
 typedef enum PylonNodeMapKind : int32_t {
@@ -328,19 +328,14 @@ PylonStatus pylon_camera_device_info(const PylonCamera* camera, PylonDeviceInfo*
 /* CInstantCamera::Open. Applies the configuration set by pylon_camera_set_configuration. */
 PylonStatus pylon_camera_open(PylonCamera* camera);
 
-/* CInstantCamera::Close. Stops grabbing first. */
-void pylon_camera_close(PylonCamera* camera);
-
 /* CInstantCamera::IsOpen. */
 bool pylon_camera_is_open(const PylonCamera* camera);
 
 /* CInstantCamera::IsCameraDeviceRemoved. Detection requires an open camera. */
 bool pylon_camera_is_device_removed(const PylonCamera* camera);
 
-/* Node map of the camera. STREAM_GRABBER and EVENT_GRABBER stay valid until pylon_camera_close
- * or pylon_camera_destroy; DEVICE, TRANSPORT_LAYER and INSTANT_CAMERA until pylon_camera_destroy
- * (pylon's device specific cameras keep the DEVICE map across Close). A failed open closes the
- * device again but does not end node maps obtained before. */
+/* Node map of the camera, valid until pylon_camera_destroy. A failed open closes the device
+ * again but does not end node maps obtained before. */
 PylonStatus pylon_camera_node_map(PylonCamera* camera, PylonNodeMapKind kind, PylonNodeMap** out);
 
 /* CInstantCamera::RegisterConfiguration with RegistrationMode_ReplaceAll. Takes effect when the

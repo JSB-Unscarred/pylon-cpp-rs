@@ -40,7 +40,7 @@ pylon-sys/build.rs              compiles the shim and links pylon
 | macOS | `PYLON_ROOT`, default `/Library/Frameworks/pylon.framework` | framework search path is the parent of `PYLON_ROOT`, plus `<PYLON_ROOT>/Headers/GenICam` | runpath of the final binary, e.g. `cargo::rustc-link-arg=-Wl,-rpath,/Library/Frameworks` in its build script |
 
 - Cargo passes link arguments only to the binaries of the package that emits them, so `pylon-sys` cannot set the runpath of downstream binaries.
-- Tests without hardware can use the pylon camera emulator: set `PYLON_CAMEMU=<count>`.
+- Without hardware, use the pylon camera emulator: set `PYLON_CAMEMU=<count>`.
 
 ## Example
 
@@ -66,7 +66,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         };
         converter.convert(&mut image, &source)?;
         let bgr = image.view().ok_or("empty image")?;
-        println!("frame {}: {}x{}, {} bytes", info.block_id, bgr.width(), bgr.height(), bgr.data().len());
+        println!("frame {}: {}x{}, {} bytes", info.block_id, bgr.width, bgr.height, bgr.data.len());
     }
     Ok(())
 }
@@ -88,7 +88,7 @@ The comment at the top of `pylon_shim.h` is the reference for handles, errors, s
 
 - Every C++ exception becomes a `PylonStatus` named after its GenICam exception class.
 - Strings and lists are delivered through synchronous callbacks.
-- The camera opens only through `pylon_camera_open`, `pylon_camera_start_grabbing` and `pylon_camera_grab_one`, and closes only through `pylon_camera_close` and `pylon_camera_destroy`, so node maps never become invalid behind the caller's back.
+- The camera opens only through `pylon_camera_open`, `pylon_camera_start_grabbing` and `pylon_camera_grab_one`, and closes only through `pylon_camera_destroy`, so node maps never become invalid behind the caller's back.
 - Handlers that pylon calls from its own threads are left out. Grabbing runs in the thread that calls `pylon_camera_retrieve_result`, and camera events arrive as node callbacks inside that call or inside `pylon_camera_grab_one`.
 - A node callback registration owns its context and releases it through a drop callback when the node map ends; registrations cannot be removed.
 - pylon enums and all `EPixelType` values are mirrored and checked with `static_assert`.
@@ -125,7 +125,7 @@ The crate documentation (`cargo doc --open`) describes the runtime, thread, borr
 | `CTlFactory::CreateDevice` / `CreateFirstDevice` + `CInstantCamera(IPylonDevice*)` | `pylon_camera_create` | `Camera::new` |
 | `CInstantCamera::~CInstantCamera` | `pylon_camera_destroy` | drop `Camera` |
 | `GetDeviceInfo` | `pylon_camera_device_info` | `Camera::device_info` |
-| `Open` / `Close` / `IsOpen` | `pylon_camera_open` / `pylon_camera_close` / `pylon_camera_is_open` | `Camera::open` / drop `Camera` / `Camera::is_open` |
+| `Open` / `Close` / `IsOpen` | `pylon_camera_open` / `pylon_camera_destroy` / `pylon_camera_is_open` | `Camera::open` / drop `Camera` / `Camera::is_open` |
 | `IsCameraDeviceRemoved` | `pylon_camera_is_device_removed` | `Camera::is_device_removed` |
 | `GetNodeMap` / `GetTLNodeMap` / `GetStreamGrabberNodeMap` / `GetEventGrabberNodeMap` / `GetInstantCameraNodeMap` | `pylon_camera_node_map` | `Camera::node_map` / `tl_node_map` / `stream_grabber_node_map` / `event_grabber_node_map` / `instant_camera_node_map` |
 | `RegisterConfiguration` with `CAcquireContinuousConfiguration` / `CAcquireSingleFrameConfiguration` / `CSoftwareTriggerConfiguration` | `pylon_camera_set_configuration` | `Camera::set_configuration`, `Configuration` |
@@ -178,7 +178,7 @@ The crate documentation (`cargo doc --open`) describes the runtime, thread, borr
 | `CImageFormatConverter::GetNodeMap` (`Gamma`, `OutputBitAlignment`, `OutputOrientation`, …) | `pylon_converter_node_map` | `Converter::node_map` |
 | `CImageFormatConverter::OutputPixelFormat` | `pylon_converter_set_output_pixel_type` | `Converter::set_output_pixel_type` |
 | `CImageFormatConverter::ImageHasDestinationFormat` | `pylon_converter_has_destination_format` | `Converter::has_destination_format` |
-| `CImageFormatConverter::Convert` | `pylon_converter_convert` | `Converter::convert`; sources from `GrabResultInfo::image`, `Image::view` or `ImageView::new` |
+| `CImageFormatConverter::Convert` | `pylon_converter_convert` | `Converter::convert`; sources from `GrabResultInfo::image`, `Image::view` or an `ImageView` of caller memory |
 
 ## Not wrapped
 

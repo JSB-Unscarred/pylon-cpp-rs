@@ -263,12 +263,12 @@ GenApi::INode* unwrap(PylonNode* node) {
     return reinterpret_cast<GenApi::INode*>(node);
 }
 
-// EPixelType has int as underlying type on MSVC and long on GCC; uint32_t carries its bit pattern.
 std::uint32_t from_pixel_type(Pylon::EPixelType type) {
     return static_cast<std::uint32_t>(type);
 }
 
 Pylon::EPixelType to_pixel_type(std::uint32_t value) {
+    // Widened to long, 0xFFFFFFFF would not be PixelType_Undefined (-1).
     using Underlying = std::underlying_type_t<Pylon::EPixelType>;
     return value == PYLON_PIXEL_TYPE_UNDEFINED
                ? Pylon::PixelType_Undefined
@@ -528,10 +528,6 @@ PylonStatus pylon_camera_device_info(const PylonCamera* camera, PylonDeviceInfo*
 
 PylonStatus pylon_camera_open(PylonCamera* camera) {
     return guard([&] { camera->camera.Open(); });
-}
-
-void pylon_camera_close(PylonCamera* camera) {
-    camera->camera.Close();
 }
 
 bool pylon_camera_is_open(const PylonCamera* camera) {

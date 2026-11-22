@@ -1,8 +1,8 @@
 //! Devices, cameras and grab results.
 
 use crate::{
-    Error, ErrorKind, ImageView, Node, NodeMap, Pylon, Result, bytes, c_string, check, handle,
-    optional_handle, out, push_handle, string, strings, sys,
+    Error, ErrorKind, ImageView, Node, NodeMap, Pylon, Result, bytes, c_string, check, handle, out,
+    push_handle, string, strings, sys,
 };
 use std::ffi::c_void;
 use std::ptr::{self, NonNull};
@@ -23,8 +23,7 @@ unsafe impl Send for DeviceInfo {}
 impl DeviceInfo {
     /// Empty device info.
     pub fn new(pylon: &Pylon) -> Result<DeviceInfo> {
-        // SAFETY: the out parameter is a valid handle pointer; pylon_device_info_create writes a
-        // non-NULL handle on PYLON_OK (pylon_shim.h).
+        // SAFETY: the handle is non-NULL on PYLON_OK (pylon_shim.h Handles).
         let raw = unsafe { handle(|info| sys::pylon_device_info_create(info)) }?;
         Ok(DeviceInfo { raw, _pylon: pylon.clone() })
     }
@@ -130,8 +129,8 @@ impl Camera {
     /// None. The camera is closed.
     pub fn new(pylon: &Pylon, device: Option<&DeviceInfo>) -> Result<Camera> {
         let info = device.map_or(ptr::null(), |info| info.raw.as_ptr().cast_const());
-        // SAFETY: info is NULL or a live device info; the out parameter is a valid handle pointer;
-        // pylon_camera_create writes a non-NULL handle on PYLON_OK (pylon_shim.h).
+        // SAFETY: info is NULL or a live device info; the handle is non-NULL on PYLON_OK
+        // (pylon_shim.h Handles).
         let raw = unsafe { handle(|camera| sys::pylon_camera_create(info, camera)) }?;
         Ok(Camera {
             raw,
@@ -143,8 +142,7 @@ impl Camera {
 
     /// Copy of the device info of the camera.
     pub fn device_info(&self) -> Result<DeviceInfo> {
-        // SAFETY: raw is a live camera; the out parameter is a valid handle pointer;
-        // pylon_camera_device_info writes a non-NULL handle on PYLON_OK (pylon_shim.h).
+        // SAFETY: raw is a live camera; the handle is non-NULL on PYLON_OK (pylon_shim.h Handles).
         let raw = unsafe { handle(|info| sys::pylon_camera_device_info(self.raw.as_ptr(), info)) }?;
         Ok(DeviceInfo { raw, _pylon: self.pylon.clone() })
     }
@@ -193,14 +191,11 @@ impl Camera {
     }
 
     fn map(&self, kind: sys::PylonNodeMapKind) -> Result<NodeMap<'_>> {
-        // SAFETY: raw is a live camera; the out parameter is a valid handle pointer;
-        // pylon_camera_node_map writes a non-NULL handle on PYLON_OK (pylon_shim.h).
+        // SAFETY: raw is a live camera; the handle is non-NULL on PYLON_OK (pylon_shim.h Handles).
         let map =
             unsafe { handle(|map| sys::pylon_camera_node_map(self.raw.as_ptr(), kind, map)) }?;
-        // SAFETY: camera node maps stay valid until pylon_camera_close or pylon_camera_destroy, and
-        // a failed open does not end them (pylon_shim.h). This crate never calls
-        // pylon_camera_close, and destroys the camera only in Drop, which needs ownership, so the
-        // map outlives the borrow of self.
+        // SAFETY: the map stays valid until the camera is destroyed (pylon_shim.h), which needs
+        // ownership, so for the borrow of self.
         Ok(unsafe { NodeMap::from_raw(map) })
     }
 
@@ -249,20 +244,17 @@ impl Camera {
     /// another call waits in this method or in [`grab_one`](Self::grab_one), also when called from
     /// a callback running inside such a call.
     pub fn retrieve_result(&self, timeout_ms: u32) -> Result<Option<GrabResult>> {
-        // SAFETY: raw is a live camera; the out parameter is a valid handle pointer; `wait` admits
-        // one thread at a time.
+        // SAFETY: raw is a live camera; `wait` admits one thread at a time.
         self.wait(false, |result| unsafe {
             sys::pylon_camera_retrieve_result(self.raw.as_ptr(), timeout_ms, result)
         })
     }
 
     /// Opens the camera, then `CInstantCamera::GrabOne`: grabs one image, also stopping on timeout.
-    /// None if the timeout expired. Fails with [`ErrorKind::Runtime`] while another call waits in
-    /// this method or in [`retrieve_result`](Self::retrieve_result), also when called from a
-    /// callback running inside such a call.
+    /// None if the timeout expired. Waits like [`retrieve_result`](Self::retrieve_result), with
+    /// the same failure.
     pub fn grab_one(&self, timeout_ms: u32) -> Result<Option<GrabResult>> {
-        // SAFETY: raw is a live camera; the out parameter is a valid handle pointer; `wait` admits
-        // one thread at a time.
+        // SAFETY: raw is a live camera; `wait` admits one thread at a time.
         self.wait(true, |result| unsafe {
             sys::pylon_camera_grab_one(self.raw.as_ptr(), timeout_ms, result)
         })
@@ -280,18 +272,19 @@ impl Camera {
         if self.waiter.compare_exchange(0, thread, Ordering::Acquire, Ordering::Relaxed).is_err() {
             return Err(Error::new(ErrorKind::Runtime, "a call is already waiting for a result"));
         }
-        let result = optional_handle(call);
+        let result = out(call);
         let stop = self.stop_requested.swap(false, Ordering::Relaxed);
         self.waiter.store(0, Ordering::Release);
         if stop && !stops_itself {
             self.stop_grabbing();
         }
-        result.map(|raw| raw.map(|raw| GrabResult { raw, _pylon: self.pylon.clone() }))
+        let result = NonNull::new(result?);
+        Ok(result.map(|raw| GrabResult { raw, _pylon: self.pylon.clone() }))
     }
 
     /// `CInstantCamera::CanWaitForFrameTriggerReady`.
     pub fn can_wait_for_frame_trigger_ready(&self) -> Result<bool> {
-        // SAFETY: raw is a live camera; the out parameter is a valid bool.
+        // SAFETY: raw is a live camera.
         out(|ready| unsafe {
             sys::pylon_camera_can_wait_for_frame_trigger_ready(self.raw.as_ptr(), ready)
         })
@@ -299,7 +292,7 @@ impl Camera {
 
     /// `CInstantCamera::WaitForFrameTriggerReady`; false if the timeout expired.
     pub fn wait_for_frame_trigger_ready(&self, timeout_ms: u32) -> Result<bool> {
-        // SAFETY: raw is a live camera; the out parameter is a valid bool.
+        // SAFETY: raw is a live camera.
         out(|ready| unsafe {
             sys::pylon_camera_wait_for_frame_trigger_ready(self.raw.as_ptr(), timeout_ms, ready)
         })
@@ -325,10 +318,9 @@ impl Camera {
     /// event data nodes unreadable, and is dropped inside it. To stop reacting, check a flag in
     /// `f`. A panic in `f` aborts the process.
     ///
-    /// When `f` runs inside `retrieve_result` or `grab_one`, these two methods of the same camera
-    /// fail inside `f`, and [`stop_grabbing`](Self::stop_grabbing) takes effect when that call
-    /// returns; when `f` runs inside [`start_grabbing`](Self::start_grabbing), `stop_grabbing`
-    /// deadlocks. Capture a `Weak<Camera>` if `f` needs the camera, since an `Arc` keeps it alive
+    /// Inside `f`, `retrieve_result` and `grab_one` of the same camera fail and
+    /// [`stop_grabbing`](Self::stop_grabbing) is deferred as described there; when `f` runs inside
+    /// [`start_grabbing`](Self::start_grabbing), `stop_grabbing` deadlocks. Capture a `Weak<Camera>` if `f` needs the camera, since an `Arc` keeps it alive
     /// forever. Read the data you need and send it to your own thread, ignoring send errors, since
     /// the receiver may be gone while the camera drops.
     pub fn register_callback<F>(&mut self, name: &str, f: F) -> Result<()>
@@ -413,7 +405,7 @@ unsafe impl Send for GrabResult {}
 impl GrabResult {
     /// Properties and buffers of the result.
     pub fn info(&self) -> Result<GrabResultInfo<'_>> {
-        // SAFETY: raw is a live result; the out parameter is a valid PylonGrabResultInfo.
+        // SAFETY: raw is a live result.
         let info = out(|info| unsafe { sys::pylon_grab_result_info(self.raw.as_ptr(), info) })?;
         // SAFETY: the buffers stay valid until the result is destroyed (pylon_shim.h), which needs
         // ownership, so for the borrow of self. Only chunk nodes write into them, and the chunk
@@ -449,8 +441,7 @@ impl GrabResult {
     /// write into the buffer of the result, so the map borrows the result mutably; read the chunk
     /// values before calling [`info`](Self::info).
     pub fn chunk_node_map(&mut self) -> Result<NodeMap<'_>> {
-        // SAFETY: raw is a live result; the out parameter is a valid handle pointer;
-        // pylon_grab_result_chunk_node_map writes a non-NULL handle on PYLON_OK (pylon_shim.h).
+        // SAFETY: raw is a live result; the handle is non-NULL on PYLON_OK (pylon_shim.h Handles).
         let map =
             unsafe { handle(|map| sys::pylon_grab_result_chunk_node_map(self.raw.as_ptr(), map)) }?;
         // SAFETY: the map stays valid until the result is destroyed (pylon_shim.h), which needs
